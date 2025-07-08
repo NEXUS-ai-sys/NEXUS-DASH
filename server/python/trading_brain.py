@@ -3,7 +3,6 @@ import sys
 import math
 import statistics
 from datetime import datetime, timedelta
-import asyncio
 import threading
 import queue
 import time
