@@ -3,17 +3,12 @@ import sys
 import math
 import statistics
 from datetime import datetime, timedelta
-import asyncio
-import threading
-import queue
 import time
 import warnings
 warnings.filterwarnings('ignore')
 
 class TradingBrain:
     def __init__(self):
-        self.analysis_queue = queue.Queue()
-        self.result_queue = queue.Queue()
         self.running = True
         
         # Initialize models and analyzers
