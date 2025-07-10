@@ -1,16 +1,129 @@
-
 import json
 import sys
-import numpy as np
-import pandas as pd
 from datetime import datetime, timedelta
 import asyncio
-import websockets
 import threading
 import queue
 import time
 import warnings
 warnings.filterwarnings('ignore')
+
+# Mock numpy and pandas functionality for WebContainer environment
+class MockNumPy:
+    def mean(self, data):
+        return sum(data) / len(data) if data else 0
+    
+    def std(self, data):
+        if not data or len(data) < 2:
+            return 0
+        mean_val = self.mean(data)
+        variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+        return variance ** 0.5
+    
+    def sqrt(self, x):
+        return x ** 0.5
+    
+    def diff(self, data):
+        return [data[i] - data[i-1] for i in range(1, len(data))]
+    
+    def arange(self, n):
+        return list(range(n))
+    
+    def polyfit(self, x, y, degree):
+        # Simple linear regression for degree 1
+        if degree == 1 and len(x) == len(y) and len(x) > 1:
+            n = len(x)
+            sum_x = sum(x)
+            sum_y = sum(y)
+            sum_xy = sum(x[i] * y[i] for i in range(n))
+            sum_x2 = sum(x[i] ** 2 for i in range(n))
+            
+            slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
+            intercept = (sum_y - slope * sum_x) / n
+            return slope, intercept
+        return 0, 0
+    
+    def sum(self, data):
+        return sum(data)
+    
+    def corrcoef(self, x, y):
+        if len(x) != len(y) or len(x) < 2:
+            return [[1, 0], [0, 1]]
+        
+        mean_x = self.mean(x)
+        mean_y = self.mean(y)
+        
+        numerator = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(len(x)))
+        sum_sq_x = sum((x[i] - mean_x) ** 2 for i in range(len(x)))
+        sum_sq_y = sum((y[i] - mean_y) ** 2 for i in range(len(y)))
+        
+        if sum_sq_x == 0 or sum_sq_y == 0:
+            return [[1, 0], [0, 1]]
+        
+        correlation = numerator / (sum_sq_x * sum_sq_y) ** 0.5
+        return [[1, correlation], [correlation, 1]]
+    
+    def uniform(self, low, high):
+        import random
+        return random.uniform(low, high)
+    
+    random = type('Random', (), {'uniform': lambda self, low, high: __import__('random').uniform(low, high)})()
+
+class MockPandas:
+    def DataFrame(self, data):
+        return MockDataFrame(data)
+
+class MockDataFrame:
+    def __init__(self, data):
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            self.data = data
+            self.columns = list(data[0].keys()) if data else []
+        elif isinstance(data, dict):
+            self.data = []
+            self.columns = list(data.keys())
+            max_len = max(len(v) if isinstance(v, list) else 1 for v in data.values()) if data else 0
+            for i in range(max_len):
+                row = {}
+                for key, value in data.items():
+                    if isinstance(value, list):
+                        row[key] = value[i] if i < len(value) else None
+                    else:
+                        row[key] = value
+                self.data.append(row)
+        else:
+            self.data = []
+            self.columns = []
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, key):
+        if isinstance(key, str) and key in self.columns:
+            return MockSeries([row.get(key) for row in self.data])
+        return None
+    
+    def iloc(self, index):
+        if 0 <= index < len(self.data):
+            return MockRow(self.data[index])
+        return MockRow({})
+
+class MockSeries:
+    def __init__(self, data):
+        self.values = [x for x in data if x is not None]
+    
+    def __len__(self):
+        return len(self.values)
+
+class MockRow:
+    def __init__(self, data):
+        self.data = data
+    
+    def __getitem__(self, key):
+        return self.data.get(key, 0)
+
+# Initialize mock modules
+np = MockNumPy()
+pd = MockPandas()
 
 class TradingBrain:
     def __init__(self):
@@ -770,8 +883,8 @@ class PatternDetector:
         
         # Simplified candlestick pattern detection
         for i in range(2, len(df)):
-            current = df.iloc[i]
-            prev = df.iloc[i-1]
+            current = df.iloc(i)
+            prev = df.iloc(i-1)
             
             # Doji pattern
             if abs(current['close'] - current['open']) < (current['high'] - current['low']) * 0.1:
