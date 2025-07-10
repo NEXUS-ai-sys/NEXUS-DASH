@@ -1,9 +1,11 @@
+
 import json
 import sys
-import math
-import statistics
+import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 import asyncio
+import websockets
 import threading
 import queue
 import time
@@ -54,26 +56,31 @@ class MarketAnalyzer:
         if not market_data:
             return {'error': 'No market data provided'}
         
+        df = pd.DataFrame(market_data)
+        
         analysis = {
-            'trend_analysis': self.analyze_trend(market_data),
-            'volatility_analysis': self.analyze_volatility(market_data),
-            'momentum_analysis': self.analyze_momentum(market_data),
-            'support_resistance': self.find_support_resistance(market_data),
-            'market_regime': self.detect_market_regime(market_data),
+            'trend_analysis': self.analyze_trend(df),
+            'volatility_analysis': self.analyze_volatility(df),
+            'momentum_analysis': self.analyze_momentum(df),
+            'support_resistance': self.find_support_resistance(df),
+            'market_regime': self.detect_market_regime(df),
             'confidence': 0.85,
             'timestamp': datetime.now().isoformat()
         }
         
         return analysis
     
-    def analyze_trend(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
+    def analyze_trend(self, df):
+        if 'price' not in df.columns:
+            return {'direction': 'unknown', 'strength': 0}
+        
+        prices = df['price'].values
         if len(prices) < 10:
             return {'direction': 'unknown', 'strength': 0}
         
         # Simple trend analysis
-        short_ma = statistics.mean(prices[-5:])
-        long_ma = statistics.mean(prices[-20:]) if len(prices) >= 20 else statistics.mean(prices)
+        short_ma = np.mean(prices[-5:])
+        long_ma = np.mean(prices[-20:]) if len(prices) >= 20 else np.mean(prices)
         
         if short_ma > long_ma * 1.01:
             direction = 'bullish'
@@ -92,13 +99,16 @@ class MarketAnalyzer:
             'long_ma': round(long_ma, 2)
         }
     
-    def analyze_volatility(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
+    def analyze_volatility(self, df):
+        if 'price' not in df.columns:
+            return {'level': 'unknown', 'value': 0}
+        
+        prices = df['price'].values
         if len(prices) < 2:
             return {'level': 'unknown', 'value': 0}
         
-        returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-        volatility = statistics.stdev(returns) * math.sqrt(252) * 100  # Annualized
+        returns = np.diff(prices) / prices[:-1]
+        volatility = np.std(returns) * np.sqrt(252) * 100  # Annualized
         
         if volatility > 30:
             level = 'high'
@@ -113,8 +123,11 @@ class MarketAnalyzer:
             'percentile': min(volatility / 50 * 100, 100)
         }
     
-    def analyze_momentum(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
+    def analyze_momentum(self, df):
+        if 'price' not in df.columns:
+            return {'strength': 0, 'direction': 'neutral'}
+        
+        prices = df['price'].values
         if len(prices) < 5:
             return {'strength': 0, 'direction': 'neutral'}
         
@@ -138,8 +151,11 @@ class MarketAnalyzer:
             'value': round(momentum, 2)
         }
     
-    def find_support_resistance(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
+    def find_support_resistance(self, df):
+        if 'price' not in df.columns:
+            return {'support': [], 'resistance': []}
+        
+        prices = df['price'].values
         if len(prices) < 10:
             return {'support': [], 'resistance': []}
         
@@ -162,15 +178,17 @@ class MarketAnalyzer:
             'resistance': sorted(resistance, reverse=True)
         }
     
-    def detect_market_regime(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
+    def detect_market_regime(self, df):
+        if 'price' not in df.columns:
+            return 'unknown'
+        
+        prices = df['price'].values
         if len(prices) < 20:
             return 'unknown'
         
         # Simple regime detection
-        returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-        volatility = statistics.stdev(returns)
-        trend_strength = abs(self.correlation(list(range(len(prices))), prices))
+        volatility = np.std(np.diff(prices) / prices[:-1])
+        trend_strength = abs(np.corrcoef(range(len(prices)), prices)[0, 1])
         
         if volatility > 0.02:
             return 'volatile'
@@ -178,22 +196,6 @@ class MarketAnalyzer:
             return 'trending'
         else:
             return 'ranging'
-    
-    def correlation(self, x, y):
-        """Calculate correlation coefficient"""
-        if len(x) != len(y) or len(x) < 2:
-            return 0
-        
-        mean_x = statistics.mean(x)
-        mean_y = statistics.mean(y)
-        
-        numerator = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(len(x)))
-        sum_sq_x = sum((x[i] - mean_x) ** 2 for i in range(len(x)))
-        sum_sq_y = sum((y[i] - mean_y) ** 2 for i in range(len(y)))
-        
-        denominator = math.sqrt(sum_sq_x * sum_sq_y)
-        
-        return numerator / denominator if denominator != 0 else 0
 
 class StrategyAnalyzer:
     def analyze(self, data):
@@ -293,8 +295,7 @@ class StrategyAnalyzer:
         for i, strat1 in enumerate(strategies):
             for j, strat2 in enumerate(strategies[i+1:], i+1):
                 # Simplified correlation calculation
-                import random
-                corr = random.uniform(0.2, 0.8)  # Mock correlation
+                corr = np.random.uniform(0.2, 0.8)  # Mock correlation
                 correlations.append({
                     'strategy1': strat1.get('name'),
                     'strategy2': strat2.get('name'),
@@ -331,8 +332,8 @@ class RiskAnalyzer:
         total_value = sum(pos.get('notionalValue', 0) for pos in positions)
         portfolio_volatility = 0.15  # Assumed 15% annual volatility
         
-        var_95 = total_value * portfolio_volatility * 1.645 / math.sqrt(252)  # Daily VaR
-        var_99 = total_value * portfolio_volatility * 2.326 / math.sqrt(252)
+        var_95 = total_value * portfolio_volatility * 1.645 / np.sqrt(252)  # Daily VaR
+        var_99 = total_value * portfolio_volatility * 2.326 / np.sqrt(252)
         expected_shortfall = var_99 * 1.2
         
         return {
@@ -404,7 +405,7 @@ class RiskAnalyzer:
             
             liquidity_scores.append(liquidity_score)
         
-        avg_liquidity = statistics.mean(liquidity_scores) if liquidity_scores else 0
+        avg_liquidity = np.mean(liquidity_scores) if liquidity_scores else 0
         
         return {
             'average_liquidity': round(avg_liquidity, 2),
@@ -567,11 +568,13 @@ class PricePredictor:
         if not market_data:
             return {'error': 'No market data provided for prediction'}
         
+        df = pd.DataFrame(market_data)
+        
         prediction = {
-            'price_forecast': self.forecast_price(market_data, prediction_horizon),
-            'direction_probability': self.predict_direction(market_data),
-            'volatility_forecast': self.forecast_volatility(market_data),
-            'confidence_intervals': self.calculate_confidence_intervals(market_data),
+            'price_forecast': self.forecast_price(df, prediction_horizon),
+            'direction_probability': self.predict_direction(df),
+            'volatility_forecast': self.forecast_volatility(df),
+            'confidence_intervals': self.calculate_confidence_intervals(df),
             'model_accuracy': 0.73,
             'confidence': 0.68,
             'timestamp': datetime.now().isoformat()
@@ -579,11 +582,11 @@ class PricePredictor:
         
         return prediction
     
-    def forecast_price(self, data, horizon):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 5:
+    def forecast_price(self, df, horizon):
+        if 'price' not in df.columns or len(df) < 5:
             return {'error': 'Insufficient price data'}
         
+        prices = df['price'].values
         current_price = prices[-1]
         
         # Simple trend-based forecast
@@ -601,10 +604,11 @@ class PricePredictor:
             'horizon_hours': horizon
         }
     
-    def predict_direction(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 5:
+    def predict_direction(self, df):
+        if 'price' not in df.columns or len(df) < 5:
             return {'up_probability': 50, 'down_probability': 50}
+        
+        prices = df['price'].values
         
         # Simple momentum-based direction prediction
         short_momentum = (prices[-1] - prices[-3]) / prices[-3] if len(prices) >= 3 else 0
@@ -624,13 +628,14 @@ class PricePredictor:
             'momentum_score': round(momentum_score, 3)
         }
     
-    def forecast_volatility(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 10:
+    def forecast_volatility(self, df):
+        if 'price' not in df.columns or len(df) < 10:
             return {'forecast': 15.0, 'current': 15.0}
         
-        returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-        current_vol = statistics.stdev(returns) * math.sqrt(252) * 100
+        prices = df['price'].values
+        returns = np.diff(prices) / prices[:-1]
+        
+        current_vol = np.std(returns) * np.sqrt(252) * 100
         
         # Simple volatility forecast (mean reversion)
         long_term_vol = 20.0  # Assumed long-term volatility
@@ -642,17 +647,17 @@ class PricePredictor:
             'regime': 'high' if forecast_vol > 25 else 'medium' if forecast_vol > 15 else 'low'
         }
     
-    def calculate_confidence_intervals(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 5:
+    def calculate_confidence_intervals(self, df):
+        if 'price' not in df.columns or len(df) < 5:
             return {'95_percent': {'lower': 0, 'upper': 0}, '68_percent': {'lower': 0, 'upper': 0}}
         
+        prices = df['price'].values
         current_price = prices[-1]
         
         # Simple volatility-based confidence intervals
         if len(prices) >= 10:
-            returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-            volatility = statistics.stdev(returns)
+            returns = np.diff(prices) / prices[:-1]
+            volatility = np.std(returns)
         else:
             volatility = 0.02  # Default 2% daily volatility
         
@@ -680,24 +685,27 @@ class PatternDetector:
         if not market_data:
             return {'error': 'No market data provided for pattern detection'}
         
+        df = pd.DataFrame(market_data)
+        
         detection = {
-            'chart_patterns': self.detect_chart_patterns(market_data),
-            'candlestick_patterns': self.detect_candlestick_patterns(market_data),
-            'support_resistance': self.detect_support_resistance_patterns(market_data),
-            'trend_patterns': self.detect_trend_patterns(market_data),
-            'volume_patterns': self.detect_volume_patterns(market_data),
+            'chart_patterns': self.detect_chart_patterns(df),
+            'candlestick_patterns': self.detect_candlestick_patterns(df),
+            'support_resistance': self.detect_support_resistance_patterns(df),
+            'trend_patterns': self.detect_trend_patterns(df),
+            'volume_patterns': self.detect_volume_patterns(df),
             'confidence': 0.71,
             'timestamp': datetime.now().isoformat()
         }
         
         return detection
     
-    def detect_chart_patterns(self, data):
+    def detect_chart_patterns(self, df):
         patterns = []
-        prices = [item.get('price', 0) for item in data if 'price' in item]
         
-        if len(prices) < 20:
+        if 'price' not in df.columns or len(df) < 20:
             return patterns
+        
+        prices = df['price'].values
         
         # Simple pattern detection
         if len(prices) >= 20:
@@ -753,18 +761,17 @@ class PatternDetector:
         
         return False
     
-    def detect_candlestick_patterns(self, data):
+    def detect_candlestick_patterns(self, df):
         patterns = []
         
-        # Check if we have OHLC data
-        required_fields = ['open', 'high', 'low', 'close']
-        if len(data) < 3 or not all(field in data[0] for field in required_fields):
+        required_cols = ['open', 'high', 'low', 'close']
+        if not all(col in df.columns for col in required_cols) or len(df) < 3:
             return patterns
         
         # Simplified candlestick pattern detection
-        for i in range(2, len(data)):
-            current = data[i]
-            prev = data[i-1]
+        for i in range(2, len(df)):
+            current = df.iloc[i]
+            prev = df.iloc[i-1]
             
             # Doji pattern
             if abs(current['close'] - current['open']) < (current['high'] - current['low']) * 0.1:
@@ -791,10 +798,11 @@ class PatternDetector:
         
         return patterns[-5:]  # Return last 5 patterns
     
-    def detect_support_resistance_patterns(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 10:
+    def detect_support_resistance_patterns(self, df):
+        if 'price' not in df.columns or len(df) < 10:
             return {'support_levels': [], 'resistance_levels': []}
+        
+        prices = df['price'].values
         
         # Find support and resistance levels
         support_levels = []
@@ -831,25 +839,26 @@ class PatternDetector:
             if abs(level - current_cluster[-1]) < current_cluster[-1] * 0.01:  # Within 1%
                 current_cluster.append(level)
             else:
-                clustered.append(round(statistics.mean(current_cluster), 2))
+                clustered.append(round(np.mean(current_cluster), 2))
                 current_cluster = [level]
         
-        clustered.append(round(statistics.mean(current_cluster), 2))
+        clustered.append(round(np.mean(current_cluster), 2))
         return clustered
     
-    def detect_trend_patterns(self, data):
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        if len(prices) < 10:
+    def detect_trend_patterns(self, df):
+        if 'price' not in df.columns or len(df) < 10:
             return {'trend': 'unknown', 'strength': 0}
         
+        prices = df['price'].values
+        
         # Linear regression for trend
-        x = list(range(len(prices)))
-        slope, intercept = self.linear_regression(x, prices)
+        x = np.arange(len(prices))
+        slope, intercept = np.polyfit(x, prices, 1)
         
         # Calculate R-squared
-        y_pred = [slope * xi + intercept for xi in x]
-        ss_res = sum((prices[i] - y_pred[i]) ** 2 for i in range(len(prices)))
-        ss_tot = sum((prices[i] - statistics.mean(prices)) ** 2 for i in range(len(prices)))
+        y_pred = slope * x + intercept
+        ss_res = np.sum((prices - y_pred) ** 2)
+        ss_tot = np.sum((prices - np.mean(prices)) ** 2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
         
         # Determine trend
@@ -866,34 +875,21 @@ class PatternDetector:
             'slope': round(slope, 4)
         }
     
-    def linear_regression(self, x, y):
-        """Simple linear regression"""
-        n = len(x)
-        sum_x = sum(x)
-        sum_y = sum(y)
-        sum_xy = sum(x[i] * y[i] for i in range(n))
-        sum_x2 = sum(xi ** 2 for xi in x)
-        
-        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
-        intercept = (sum_y - slope * sum_x) / n
-        
-        return slope, intercept
-    
-    def detect_volume_patterns(self, data):
-        volumes = [item.get('volume', 0) for item in data if 'volume' in item]
-        prices = [item.get('price', 0) for item in data if 'price' in item]
-        
-        if len(volumes) < 5:
+    def detect_volume_patterns(self, df):
+        if 'volume' not in df.columns or len(df) < 5:
             return {'pattern': 'unknown', 'strength': 0}
         
+        volumes = df['volume'].values
+        prices = df['price'].values if 'price' in df.columns else None
+        
         # Volume trend
-        recent_vol = statistics.mean(volumes[-5:])
-        older_vol = statistics.mean(volumes[-10:-5]) if len(volumes) >= 10 else recent_vol
+        recent_vol = np.mean(volumes[-5:])
+        older_vol = np.mean(volumes[-10:-5]) if len(volumes) >= 10 else recent_vol
         
         vol_change = (recent_vol - older_vol) / older_vol * 100 if older_vol != 0 else 0
         
         # Price-volume relationship
-        if len(prices) == len(volumes) and len(prices) >= 5:
+        if prices is not None and len(prices) == len(volumes):
             price_change = (prices[-1] - prices[-5]) / prices[-5] * 100 if len(prices) >= 5 else 0
             
             if price_change > 0 and vol_change > 0:
