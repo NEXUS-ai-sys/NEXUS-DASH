@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import json
 import sys
 import math
@@ -41,6 +42,85 @@ class TradingBrain:
                 return {'error': f'Unknown analysis type: {analysis_type}'}
         except Exception as e:
             return {'error': str(e), 'type': 'analysis_error'}
+    
+    def backtest_strategy(self, data):
+        """Simple strategy backtesting"""
+        try:
+            strategy = data.get('strategy', {})
+            market_data = data.get('market_data', [])
+            
+            if not market_data:
+                return {'error': 'No market data provided for backtesting'}
+            
+            # Simple backtest simulation
+            initial_capital = 10000
+            capital = initial_capital
+            trades = []
+            positions = []
+            
+            for i, candle in enumerate(market_data):
+                price = candle.get('price', candle.get('close', 0))
+                
+                # Simple moving average crossover strategy
+                if i >= 20:  # Need enough data for moving averages
+                    short_ma = sum(item.get('price', item.get('close', 0)) 
+                                 for item in market_data[i-5:i]) / 5
+                    long_ma = sum(item.get('price', item.get('close', 0)) 
+                                for item in market_data[i-20:i]) / 20
+                    
+                    # Entry signal
+                    if short_ma > long_ma and not positions:
+                        # Buy signal
+                        position_size = capital * 0.1  # Risk 10% per trade
+                        shares = position_size / price
+                        positions.append({
+                            'entry_price': price,
+                            'shares': shares,
+                            'entry_time': i
+                        })
+                        trades.append({
+                            'type': 'buy',
+                            'price': price,
+                            'shares': shares,
+                            'time': i
+                        })
+                    
+                    # Exit signal
+                    elif short_ma < long_ma and positions:
+                        # Sell signal
+                        for position in positions:
+                            profit = (price - position['entry_price']) * position['shares']
+                            capital += profit
+                            trades.append({
+                                'type': 'sell',
+                                'price': price,
+                                'shares': position['shares'],
+                                'profit': profit,
+                                'time': i
+                            })
+                        positions = []
+            
+            # Calculate performance metrics
+            total_return = (capital - initial_capital) / initial_capital * 100
+            winning_trades = [t for t in trades if t.get('profit', 0) > 0]
+            losing_trades = [t for t in trades if t.get('profit', 0) < 0]
+            
+            win_rate = len(winning_trades) / len([t for t in trades if 'profit' in t]) * 100 if trades else 0
+            
+            return {
+                'initial_capital': initial_capital,
+                'final_capital': round(capital, 2),
+                'total_return': round(total_return, 2),
+                'total_trades': len(trades),
+                'winning_trades': len(winning_trades),
+                'losing_trades': len(losing_trades),
+                'win_rate': round(win_rate, 2),
+                'trades': trades[-10:],  # Last 10 trades
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {'error': str(e), 'type': 'backtest_error'}
 
 class MarketAnalyzer:
     def analyze(self, data):
@@ -296,6 +376,7 @@ class StrategyAnalyzer:
         
         correlations = []
         import random
+        random.seed(42)  # For consistent results
         for i, strat1 in enumerate(strategies):
             for j, strat2 in enumerate(strategies[i+1:], i+1):
                 # Simplified correlation calculation
